@@ -52,7 +52,7 @@ export declare function getOwner(): ComputationNode | undefined;
 export declare function runWithOwner<T>(owner: ComputationNode | undefined, fn: () => T): T;
 export interface INode<T> {
     clock(): IClock;
-    current(untrack?: boolean): T;
+    current: (untrack?: boolean, instantaneous?: boolean) => T;
 }
 /**
  * # ComputationNode class
@@ -73,8 +73,8 @@ export declare class ComputationNode implements INode<unknown> {
     cleanups: (((final: boolean) => void)[]) | undefined;
     context: Map<object, unknown>;
     kept: boolean;
+    current: (untrack?: boolean, instantaneous?: boolean) => any;
     constructor();
-    current(): any;
     clock(): {
         time: () => number;
     };
@@ -319,8 +319,8 @@ declare class Context<T> {
      * @returns The result of the function execution
      */
     Provider<R>(props: {
-        children: R;
-        value: T;
+        Children: R;
+        Value: T;
     }): R;
 }
 /**

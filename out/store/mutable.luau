@@ -37,7 +37,7 @@ local function getNode(nodes, key, value)
 end
 local SELF
 local trackSelf = function(obj)
-	return isListening() and getNode(getNodes(obj), SELF):current()
+	return isListening() and getNode(getNodes(obj), SELF).current()
 end
 local updateSelf = function(obj)
 	local _result = getNodes(obj)[SELF]
@@ -73,35 +73,42 @@ local RAW = {}
 local TRACK = {}
 SELF = {}
 PROXY = {}
-local function unwrap(obj)
-	return untrack(function()
-		if not isWrapped(obj) then
-			return obj
+local RAW_TRACKED = {}
+local function unwrap(obj, untracks)
+	if untracks == nil then
+		untracks = true
+	end
+	if untracks then
+		return untrack(function()
+			return unwrap(obj, false)
+		end)
+	end
+	if not isWrapped(obj) then
+		return obj
+	end
+	if Object.isArray(obj) then
+		local newObj = {}
+		for _, val in obj do
+			newObj[#newObj + 1] = unwrap(val)
 		end
-		if Object.isArray(obj) then
-			local newObj = {}
-			for i = 0, #obj - 1 do
-				local value = obj[i + 1]
-				if value == nil then
-					continue
-				end
-				newObj[i + 1] = unwrap(value)
-			end
-			return newObj
-		else
-			local newObj = {}
-			for _, _binding in Object.entries(obj) do
-				local key = _binding[1]
-				local value = _binding[2]
-				local unwrapped = unwrap(value)
-				if unwrapped == nil then
-					continue
-				end
-				newObj[key] = unwrapped
-			end
-			return newObj
+		return newObj
+	else
+		local newObj = {}
+		for _, _binding in Object.entries(obj) do
+			local key = _binding[1]
+			local value = _binding[2]
+			newObj[key] = unwrap(value)
 		end
-	end)
+		return newObj
+	end
+end
+local function trackAll(obj)
+	if not isWrapped(obj) then
+		return nil
+	end
+	for _, value in Object.values(obj) do
+		trackAll(value)
+	end
 end
 local function withWrap(obj)
 	if isWrapped(obj) then
@@ -114,9 +121,15 @@ local function withWrap(obj)
 	end
 	return obj
 end
-local function withoutWrap(obj)
+local function withoutWrap(obj, untracked)
+	if untracked == nil then
+		untracked = true
+	end
 	if isWrapped(obj) then
-		return obj[RAW]
+		if untracked then
+			return obj[RAW]
+		end
+		return obj[RAW_TRACKED]
 	end
 	return obj
 end
@@ -130,36 +143,45 @@ local function wrap(target)
 		return proxy
 	end
 	proxy = Proxy.new(target, {
-		get = function(target, key)
+		get = function(target, key, proxy)
 			if key == RAW then
-				return unwrap(target)
+				return target
 			end
 			if key == TRACK then
 				return trackSelf(target)
 			end
+			if key == RAW_TRACKED then
+				trackAll(proxy)
+				return target
+			end
 			local nodes = getNodes(target)
 			local tracked = nodes[key]
-			local value = if tracked == nil then target[key] else tracked:current()
+			local value = if tracked == nil then target[key] else tracked.current(false, true)
 			if tracked == nil and isListening() then
-				value = getNode(nodes, key, value):current()
+				value = getNode(nodes, key, value).current(false, true)
 			end
 			return wrap(value)
 		end,
 		set = function(target, key, value, proxy)
 			if key == RAW then
-				return false
+				return true
 			end
 			if key == TRACK then
-				return false
+				return true
 			end
+			if key == RAW_TRACKED then
+				return true
+			end
+			local _value = value
+			value = if type(_value) == "table" then withoutWrap(value) else value
 			local current = target[key]
 			if current == value then
 				return true
 			end
 			untrack(function()
 				batch(function()
-					local _value = value
-					local _condition = type(_value) == "table"
+					local _value_1 = value
+					local _condition = type(_value_1) == "table"
 					if _condition then
 						_condition = type(current) == "table" and Object.isArray(value) == Object.isArray(current)
 					end
@@ -254,11 +276,13 @@ local createMutable = function(obj)
 end
 return {
 	unwrap = unwrap,
+	trackAll = trackAll,
 	withWrap = withWrap,
 	withoutWrap = withoutWrap,
 	RAW = RAW,
 	TRACK = TRACK,
 	SELF = SELF,
 	PROXY = PROXY,
+	RAW_TRACKED = RAW_TRACKED,
 	createMutable = createMutable,
 }

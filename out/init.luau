@@ -164,19 +164,21 @@ do
 		self.cleanups = nil
 		self.context = {}
 		self.kept = false
-	end
-	function ComputationNode:current()
-		if Listener ~= nil then
-			if self.age == RootClock.time then
-				if self.state == RUNNING then
-					error("circular dependency")
-				else
-					updateNode(self)
+		self.current = function(untrack, _)
+			if Listener ~= nil then
+				if self.age == RootClock.time then
+					if self.state == RUNNING then
+						error("circular dependency")
+					else
+						updateNode(self)
+					end
+				end
+				if not untrack then
+					logComputationRead(self)
 				end
 			end
-			logComputationRead(self)
+			return self.value
 		end
-		return self.value
 	end
 	function ComputationNode:clock()
 		return RootClockProxy
@@ -211,19 +213,9 @@ local function getCandidateNode()
 		_condition = _size > 0
 	end
 	if _condition then
-		local _exp = Owner.context
-		-- ▼ ReadonlyMap.forEach ▼
-		local _callback = function(v, k)
-			local _context = node.context
-			local _k = k
-			local _v = v
-			_context[_k] = _v
-			return _context
+		for k, v in Owner.context do
+			node.context[k] = v
 		end
-		for _k, _v in _exp do
-			_callback(_v, _k, _exp)
-		end
-		-- ▲ ReadonlyMap.forEach ▲
 	end
 	return node
 end
@@ -326,6 +318,15 @@ do
 		self.signalPredicate = signalPredicate
 		self.pending = NOTPENDING
 		self.log = nil
+		self.current = function(untrack, instantaneous)
+			if not untrack and Listener ~= nil then
+				logDataRead(self)
+			end
+			if CurrBench ~= nil then
+				CurrBench.reads += 1
+			end
+			return if instantaneous then self:getInstantaneousValue() else self.value
+		end
 	end
 	function DataNode:getInstantaneousValue()
 		if self.pending == NOTPENDING then
@@ -335,30 +336,21 @@ do
 		end
 	end
 	function DataNode:shouldUpdate(a, b)
-		if self.signalPredicate == false then
-			return true
-		end
+		-- Most common case first (direct equality check)
 		if self.signalPredicate == true then
 			return a ~= b
 		end
+		-- Less common cases
+		if self.signalPredicate == false then
+			return true
+		end
 		return not self.signalPredicate(a, b)
-	end
-	function DataNode:current(untrack)
-		if untrack == nil then
-			untrack = false
-		end
-		if not untrack and Listener ~= nil then
-			logDataRead(self)
-		end
-		if CurrBench ~= nil then
-			CurrBench.reads += 1
-		end
-		return self.value
 	end
 	function DataNode:next(value)
 		if not self:shouldUpdate(if self.pending == NOTPENDING then self.value else self.pending, value) then
 			return value
 		end
+		-- Batched case
 		if RunningClock ~= nil then
 			local notPending = self.pending == NOTPENDING
 			self.pending = value
@@ -419,23 +411,23 @@ end
 	 
 ]]
 local function makeLazyDataNode(value, options)
-	local _result = options
-	if _result ~= nil then
-		_result = _result.lazy
-	end
-	local _condition = _result
-	if _condition == nil then
-		_condition = true
-	end
-	local node = if _condition then nil else makeDataNode(value, options)
+	local node = if options == nil or options.lazy ~= false then nil else makeDataNode(value, options)
 	local owner = Owner
 	return function()
-		if node == nil then
-			node = runWithOwner(owner or Owner, function()
-				return makeDataNode(value, options)
-			end)
+		if node ~= nil then
+			return node
 		end
-		return node
+		local _owner = Owner
+		Owner = owner or _owner
+		local _exitType, _returns = TS.try(function()
+			node = makeDataNode(value, options)
+			return TS.TRY_RETURN, { node }
+		end, nil, function()
+			Owner = _owner
+		end)
+		if _exitType then
+			return unpack(_returns)
+		end
 	end
 end
 --[[
@@ -456,24 +448,22 @@ local function createSignal(value, options)
 	}, {
 		__call = withArgCount(function(argCount, _, value)
 			if argCount == 1 then
-				return node():current()
+				return node().current()
 			else
 				return node():next(value)
 			end
 		end),
 		__index = function(target, key)
 			if key == "val" then
-				return node():current()
+				return node().current()
 			elseif key == "set" then
 				return function(fn)
 					return node():next(fn(node():getInstantaneousValue()))
 				end
 			elseif key == "peek" then
-				return node():current(true)
+				return node().current(true)
 			elseif key == "accessor" then
-				return function()
-					return node():current()
-				end
+				return node().current
 			end
 			return target[key]
 		end,
@@ -507,13 +497,10 @@ end
 	 * @returns 
 	 
 ]]
-local batch
 local function makeMemoNode(fn, value, options)
 	local dataNode
 	local computationNode = createComputation(function(V)
-		local newVal = batch(function()
-			return fn(V)
-		end)
+		local newVal = fn(V)
 		if dataNode then
 			dataNode:next(newVal)
 		end
@@ -536,23 +523,23 @@ end
 	 
 ]]
 local function makeLazyMemoNode(fn, value, options)
-	local _result = options
-	if _result ~= nil then
-		_result = _result.lazy
-	end
-	local _condition = _result
-	if _condition == nil then
-		_condition = true
-	end
-	local dataNode = if _condition then nil else makeMemoNode(fn, value, options)
+	local node = if options == nil or options.lazy ~= false then nil else makeMemoNode(fn, value, options)
 	local owner = Owner
 	return function()
-		if dataNode == nil then
-			dataNode = runWithOwner(owner or Owner, function()
-				return makeMemoNode(fn, value, options)
-			end)
+		if node ~= nil then
+			return node
 		end
-		return dataNode
+		local _owner = Owner
+		Owner = owner or _owner
+		local _exitType, _returns = TS.try(function()
+			node = makeMemoNode(fn, value, options)
+			return TS.TRY_RETURN, { node }
+		end, nil, function()
+			Owner = _owner
+		end)
+		if _exitType then
+			return unpack(_returns)
+		end
 	end
 end
 --[[
@@ -568,26 +555,21 @@ end
 	 * @param options 
 	 
 ]]
-local untrack
 local function createMemo(fn, value, options)
 	local node = makeLazyMemoNode(fn, value, options)
 	return setmetatable({
 		SIGNAL = false,
 	}, {
 		__call = function()
-			return node():current()
+			return node().current()
 		end,
 		__index = function(target, key)
 			if key == "val" then
-				return node():current()
+				return node().current()
 			elseif key == "peek" then
-				return untrack(function()
-					return node():current()
-				end)
+				return node().current(true)
 			elseif key == "accessor" then
-				return function()
-					return node():current()
-				end
+				return node().current
 			end
 			return target[key]
 		end,
@@ -616,12 +598,19 @@ end
 	 * @returns The result of the function execution
 	 
 ]]
-function untrack(fn)
+local function untrack(fn)
+	-- Fast path: if no listener is active, avoid temporary variable overhead
+	if Listener == nil then
+		return fn()
+	end
 	local result
 	local listener = Listener
 	Listener = nil
-	result = fn()
-	Listener = listener
+	TS.try(function()
+		result = fn()
+	end, nil, function()
+		Listener = listener
+	end)
 	return result
 end
 --[[
@@ -642,9 +631,7 @@ local function createEffect(fn, value)
 	local _value = _binding.value
 	return if node == nil then function()
 		return _value
-	end else function()
-		return node:current()
-	end
+	end else node.current
 end
 --[[
 	*
@@ -688,20 +675,21 @@ end
 	 * @returns The result of the function execution
 	 
 ]]
-function batch(fn)
-	local result = nil
+local function batch(fn)
+	-- Fast path - if already in a batch, just run the function directly
 	if RunningClock ~= nil then
-		result = fn()
-	else
-		RunningClock = RootClock
-		RunningClock.changes:reset()
-		TS.try(function()
-			result = fn()
-			event()
-		end, nil, function()
-			RunningClock = nil
-		end)
+		return fn()
 	end
+	-- New batch - set up clock and run
+	RunningClock = RootClock
+	RunningClock.changes:reset()
+	local result
+	TS.try(function()
+		result = fn()
+		event()
+	end, nil, function()
+		RunningClock = nil
+	end)
 	return result
 end
 --[[
@@ -812,8 +800,8 @@ do
 		return _value
 	end
 	function Context:Provider(props)
-		return self:apply(props.value, function()
-			return props.children
+		return self:apply(props.Value, function()
+			return props.Children
 		end)
 	end
 end
@@ -973,37 +961,45 @@ function finishToplevelComputation(owner, listener)
 	end
 end
 function recycleOrClaimNode(node, fn, value, orphan)
-	local _owner = if orphan or Owner == nil or Owner == UNOWNED then nil else Owner
+	-- Get owner if there is one or if not orphaned
+	local _owner = if orphan or Owner == UNOWNED then nil else Owner
+	-- Node can be recycled if:
+	-- 1. It's not being kept
+	-- 2. It has no dependencies like data nodes called when it was the Listener
+	-- 3. Owns nothing and has no cleanups (no need to dispose) or has an owner to transfer them to
 	local recycle = node.kept == false and node.source1 == nil and (node.owned == nil and node.cleanups == nil or _owner ~= nil)
 	if recycle then
+		-- Mark for reuse
 		LastNode = node
-		if _owner ~= nil then
-			if node.owned ~= nil then
-				if _owner.owned == nil then
-					_owner.owned = node.owned
-				else
-					for _, ownedNode in node.owned do
-						_owner.owned[#_owner.owned + 1] = ownedNode
-					end
+		-- If there's any element to transfer, transfer them to the owner, and clear contexts
+		-- (owner is logically defined if any transferable data is present, unless it would be not recyclable, cf above)
+		if node.owned ~= nil then
+			if _owner.owned == nil then
+				_owner.owned = node.owned
+			else
+				for _, ownedNode in node.owned do
+					_owner.owned[#_owner.owned + 1] = ownedNode
 				end
 			end
-			if node.cleanups ~= nil then
-				if _owner.cleanups == nil then
-					_owner.cleanups = node.cleanups
-				else
-					for _, cleanup in node.cleanups do
-						_owner.cleanups[#_owner.cleanups + 1] = cleanup
-					end
-				end
-			end
-			node.cleanups = nil
-			node.owned = node.cleanups
-			table.clear(node.context)
 		end
+		if node.cleanups ~= nil then
+			if _owner.cleanups == nil then
+				_owner.cleanups = node.cleanups
+			else
+				for _, cleanup in node.cleanups do
+					_owner.cleanups[#_owner.cleanups + 1] = cleanup
+				end
+			end
+		end
+		node.cleanups = nil
+		node.owned = node.cleanups
+		table.clear(node.context)
 	else
+		-- Set the node its own function, value and age (claim it)
 		node.fn = fn
 		node.value = value
 		node.age = RootClock.time
+		-- Add node to owner's owned list
 		if _owner ~= nil then
 			if _owner.owned == nil then
 				_owner.owned = { node }
@@ -1055,10 +1051,12 @@ function logComputationRead(node)
 	logRead(node.log)
 end
 function event()
-	-- b/c we might be under a top level S.root(), have to preserve current root
+	-- Preserve current owner while running events
 	local owner = Owner
+	-- Reset updates queue and increment time
 	RootClock.updates:reset()
 	RootClock.time += 1
+	-- Run the clock updates with try/finally to ensure state is restored
 	TS.try(function()
 		run(RootClock)
 	end, nil, function()
@@ -1081,7 +1079,7 @@ function run(clock)
 		clock.changes:run(applyDataChange)
 		clock.updates:run(updateNode)
 		clock.disposes:run(dispose)
-		-- if there are still changes after excessive batches, assume runaway            
+		-- if there are still changes after excessive batches, assume runaway
 		count += 1
 		if count > 1e5 then
 			error("Runaway clock detected")
@@ -1117,16 +1115,19 @@ end
 local markOwnedNodesForDisposal
 function markNodeStale(node)
 	local time = RootClock.time
-	if node.age < time then
-		node.age = time
-		node.state = STALE
-		RootClock.updates:add(node)
-		if node.owned ~= nil then
-			markOwnedNodesForDisposal(node.owned)
-		end
-		if node.log ~= nil then
-			markComputationsStale(node.log)
-		end
+	if node.age >= time then
+		return nil
+	end
+	node.age = time
+	node.state = STALE
+	RootClock.updates:add(node)
+	-- Handle owned nodes if any
+	if node.owned ~= nil then
+		markOwnedNodesForDisposal(node.owned)
+	end
+	-- Mark downstream nodes if any
+	if node.log ~= nil then
+		markComputationsStale(node.log)
 	end
 end
 function markOwnedNodesForDisposal(owned)
@@ -1140,25 +1141,26 @@ function markOwnedNodesForDisposal(owned)
 end
 local cleanupNode
 function updateNode(node)
-	if node.state == STALE then
-		local owner = Owner
-		local listener = Listener
-		Listener = node
-		Owner = Listener
-		node.state = RUNNING
-		cleanupNode(node, false)
-		if CurrBench ~= nil then
-			CurrBench.computations += 1
-		end
-		node.value = node.fn(node.value)
-		node.state = CURRENT
-		Owner = owner
-		Listener = listener
+	-- Fast return if node isn't stale - avoid further checks
+	if node.state ~= STALE then
+		return nil
 	end
+	local owner = Owner
+	local listener = Listener
+	Listener = node
+	Owner = Listener
+	node.state = RUNNING
+	cleanupNode(node, false)
+	if CurrBench ~= nil then
+		CurrBench.computations += 1
+	end
+	node.value = node.fn(node.value)
+	node.state = CURRENT
+	Owner = owner
+	Listener = listener
 end
 local cleanupSource
 function cleanupNode(node, final)
-	local sourceslots = node.sourceslots
 	if node.cleanups ~= nil then
 		for _, cleanup in node.cleanups do
 			cleanup(final)
@@ -1175,7 +1177,7 @@ function cleanupNode(node, final)
 		cleanupSource(node.source1, node.source1slot)
 		node.source1 = nil
 	end
-	if node.sources ~= nil and sourceslots ~= nil then
+	if node.sources ~= nil and node.sourceslots ~= nil then
 		for i = 0, #node.sources - 1 do
 			local _exp = node.sources
 			-- ▼ Array.pop ▼
@@ -1183,10 +1185,11 @@ function cleanupNode(node, final)
 			local _result = _exp[_length]
 			_exp[_length] = nil
 			-- ▲ Array.pop ▲
+			local _exp_1 = node.sourceslots
 			-- ▼ Array.pop ▼
-			local _length_1 = #sourceslots
-			local _result_1 = sourceslots[_length_1]
-			sourceslots[_length_1] = nil
+			local _length_1 = #_exp_1
+			local _result_1 = _exp_1[_length_1]
+			_exp_1[_length_1] = nil
 			-- ▲ Array.pop ▲
 			cleanupSource(_result, _result_1)
 		end
