@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "../index";
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "../signals";
 import { RunService } from "@rbxts/services";
 
 export type TweenProps = {

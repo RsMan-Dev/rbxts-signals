@@ -1,5 +1,5 @@
 import { Object, Proxy } from '@rbxts/jsnatives'
-import { IDataNode, makeDataNode, isListening, untrack, batch, getOwner, onCleanup } from '../index'
+import { IDataNode, makeDataNode, isListening, untrack, batch, getOwner, onCleanup } from '../signals'
 
 const objectNodes = new WeakMap<object, Record<string | symbol, IDataNode<unknown>>>()
 const objectProxies = new WeakMap<object, object>()

@@ -1,12 +1,12 @@
 -- Compiled with roblox-ts v3.0.0
 local TS = _G[script]
-local _index = TS.import(script, script.Parent.Parent)
-local createEffect = _index.createEffect
-local createMemo = _index.createMemo
-local createSignal = _index.createSignal
-local on = _index.on
-local onCleanup = _index.onCleanup
-local untrack = _index.untrack
+local _signals = TS.import(script, script.Parent.Parent, "signals")
+local createEffect = _signals.createEffect
+local createMemo = _signals.createMemo
+local createSignal = _signals.createSignal
+local on = _signals.on
+local onCleanup = _signals.onCleanup
+local untrack = _signals.untrack
 local RunService = TS.import(script, TS.getModule(script, "@rbxts", "services")).RunService
 --[[
 	*

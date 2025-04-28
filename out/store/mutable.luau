@@ -3,11 +3,11 @@ local TS = _G[script]
 local _jsnatives = TS.import(script, TS.getModule(script, "@rbxts", "jsnatives").out)
 local Object = _jsnatives.Object
 local Proxy = _jsnatives.Proxy
-local _index = TS.import(script, script.Parent.Parent)
-local makeDataNode = _index.makeDataNode
-local isListening = _index.isListening
-local untrack = _index.untrack
-local batch = _index.batch
+local _signals = TS.import(script, script.Parent.Parent, "signals")
+local makeDataNode = _signals.makeDataNode
+local isListening = _signals.isListening
+local untrack = _signals.untrack
+local batch = _signals.batch
 local objectNodes = setmetatable({}, {
 	__mode = "k",
 })

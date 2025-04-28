@@ -16,23 +16,6 @@
     "out",
     "!**/*.tsbuildinfo"
   ],
-  "exports":{
-    ".": {
-      "import": "./out/init.lua",
-      "types": "./out/index.d.ts",
-      "require": "./out/init.lua"
-    },
-    "./store": {
-      "import": "./out/store/init.lua",
-      "types": "./out/store/index.d.ts",
-      "require": "./out/store/init.lua"
-    },
-    "./primitives": {
-      "import": "./out/primitives/init.lua",
-      "types": "./out/primitives/index.d.ts",
-      "require": "./out/primitives/init.lua"
-    }
-  },
   "publishConfig": {
     "access": "public"
   },
