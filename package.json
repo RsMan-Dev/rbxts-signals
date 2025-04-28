@@ -7,10 +7,18 @@
     "watch": "rbxtsc -w",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "signals",
+    "reactive",
+    "signals-ts",
+    "signals-lua",
+    "signals-lua-ts",
+    "solid",
+    "sjs"
+  ],
+  "author": "RsMan-Dev",
   "license": "MIT",
-  "description": "",
+  "description": "A library for reactive programming in Roblox using signals",
   "types": "out/index.d.ts",
   "files": [
     "out",
