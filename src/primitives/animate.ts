@@ -10,7 +10,7 @@ export function keyframes(
       const key = keys[i];
       if (t <= key.at) {
         const progress = (t - prevKey.at) / (key.at - prevKey.at);
-        const easing = key.easing || ((x: number) => x);
+        const easing = key.easing || curves.linear;
         return prevKey.value + easing(progress) * (key.value - prevKey.value);
       }
       prevKey = key;
@@ -19,20 +19,24 @@ export function keyframes(
   };
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
 export const curves = {
-  cubicBezier: (x1: number, y1: number, x2: number, y2: number) => {
-    const cx = 3 * x1;
-    const bx = 3 * (x2 - x1) - cx;
-    const ax = 1 - cx - bx;
-    const cy = 3 * y1;
-    const by = 3 * (y2 - y1) - cy;
-    const ay = 1 - cy - by;
-    return (t: number) => {
-      const t2 = t * t;
-      const t3 = t2 * t;
-      return ax * t3 + bx * t2 + cx * t + cy * t2 + by * t + ay;
+  cubicBezier: (p0: Point, p1: Point, p2: Point, p3: Point) => {
+    return (t: number): number => {
+      const u = 1 - t;
+      const tt = t * t;
+      const uu = u * u;
+      const uuu = uu * u;
+      const ttt = tt * t;
+  
+      return uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y;
     };
-  },
+  }
+  ,
   linear: (t: number) => t,
   easeIn: (t: number) => t * t,
   easeOut: (t: number) => t * (2 - t),
@@ -69,10 +73,7 @@ export const curves = {
     const s = 1.70158;
     return t * t * ((s + 1) * t - s);
   },
-  backIn: (t: number) => {
-    const s = 1.70158;
-    return t * t * ((s + 1) * t - s);
-  },
+  backIn: (t: number) => curves.back(t),
   backOut: (t: number) => {
     const s = 1.70158;
     return (t -= 1) * t * ((s + 1) * t + s) + 1;
