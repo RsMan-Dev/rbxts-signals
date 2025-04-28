@@ -17,9 +17,18 @@
     "!**/*.tsbuildinfo"
   ],
   "exports":{
-    ".": "./out/",
-    "./store": "./out/store/",
-    "./primitives": "./out/primitives/"
+    ".": {
+      "import": "./out/index.lua",
+      "types": "./out/index.d.ts"
+    },
+    "./store": {
+      "import": "./out/store/index.lua",
+      "types": "./out/store/index.d.ts"
+    },
+    "./primitives": {
+      "import": "./out/primitives/index.lua",
+      "types": "./out/primitives/index.d.ts"
+    }
   },
   "publishConfig": {
     "access": "public"
