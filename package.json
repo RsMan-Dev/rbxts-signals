@@ -18,16 +18,19 @@
   ],
   "exports":{
     ".": {
-      "import": "./out/index.lua",
-      "types": "./out/index.d.ts"
+      "import": "./out/init.lua",
+      "types": "./out/index.d.ts",
+      "require": "./out/init.lua"
     },
     "./store": {
-      "import": "./out/store/index.lua",
-      "types": "./out/store/index.d.ts"
+      "import": "./out/store/init.lua",
+      "types": "./out/store/index.d.ts",
+      "require": "./out/store/init.lua"
     },
     "./primitives": {
-      "import": "./out/primitives/index.lua",
-      "types": "./out/primitives/index.d.ts"
+      "import": "./out/primitives/init.lua",
+      "types": "./out/primitives/index.d.ts",
+      "require": "./out/primitives/init.lua"
     }
   },
   "publishConfig": {
