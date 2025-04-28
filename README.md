@@ -40,12 +40,12 @@ A batch freezes the updates, so signals are only updated when batching is finish
 ## Installation (will provide npm package soon)
 
 <!-- ```bash
-npm install @rbxts/jsnatives
+npm install @rbxts/signals
 ``` -->
 from github directly:
 
 ```bash
-npm install @rbxts/jsnatives@github:RsMan-Dev/rbxts-jsnatives
+npm install @rbxts/signals@github:RsMan-Dev/rbxts-signals
 ```
 
 ---
