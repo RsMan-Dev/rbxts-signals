@@ -1,5 +1,5 @@
 import { Object, Proxy } from '@rbxts/jsnatives'
-import { IDataNode, makeDataNode, isListening, untrack, batch } from '../index'
+import { IDataNode, makeDataNode, isListening, untrack, batch, getOwner, onCleanup } from '../index'
 
 const objectNodes = new WeakMap<object, Record<string | symbol, IDataNode<unknown>>>()
 const objectProxies = new WeakMap<object, object>()
@@ -31,29 +31,27 @@ const isWrapped = (obj: unknown): obj is object => {
   return true
 }
 
-export const RAW = {} as symbol, TRACK = {} as symbol, SELF = {} as symbol, PROXY = {} as symbol
+export const RAW = {} as symbol, TRACK = {} as symbol, SELF = {} as symbol, PROXY = {} as symbol, RAW_TRACKED = {} as symbol
 
-export function unwrap<T>(obj: T): T {
-  return untrack(() => {
-    if (!isWrapped(obj)) return obj
-    if (Object.isArray(obj)) {
-      const newObj = []
-      for (let i = 0; i < obj.size(); i++) {
-        const value = obj[i]
-        if (value === undefined) continue
-        newObj[i] = unwrap(value)
-      }
-      return newObj as T
-    } else {
-      const newObj = {} as Record<string | symbol, unknown>
-      for (const [key, value] of Object.entries(obj)) {
-        const unwrapped = unwrap(value)
-        if (unwrapped === undefined) continue
-        newObj[key as keyof typeof newObj] = unwrapped
-      }
-      return newObj as T
-    }
-  })
+export function unwrap<T>(obj: T, untracks = true): T {
+  if (untracks) return untrack(() => unwrap(obj, false))
+  if (!isWrapped(obj)) return obj
+
+  if (Object.isArray(obj)) {
+    const newObj = [] as unknown[]
+    for (const val of obj) newObj[newObj.size()] = unwrap(val)
+    return newObj as T
+  } else {
+    const newObj = {} as Record<string | symbol, unknown>
+    for (const [key, value] of Object.entries(obj))
+      newObj[key as keyof typeof newObj] = unwrap(value)
+    return newObj as T
+  }
+}
+
+export function trackAll(obj: object): void {
+  if (!isWrapped(obj)) return
+  for (const value of Object.values(obj)) trackAll(value)
 }
 
 export function withWrap<T extends object>(obj: T): T {
@@ -63,8 +61,11 @@ export function withWrap<T extends object>(obj: T): T {
   return obj // not wrapped, return it
 }
 
-export function withoutWrap<T extends object>(obj: T): T {
-  if (isWrapped(obj)) return (obj as Record<string | symbol, unknown>)[RAW] as T // if already wrapped, return raw
+export function withoutWrap<T extends object>(obj: T, untracked = true): T {
+  if (isWrapped(obj)) { // if already wrapped, return raw, or taw tracked
+    if (untracked) return (obj as Record<string | symbol, unknown>)[RAW] as T
+    return (obj as Record<string | symbol, unknown>)[RAW_TRACKED] as T
+  }
   return obj // not wrapped, return it
 }
 
@@ -76,20 +77,26 @@ function wrap<T>(target: T): T {
   if (proxy) return proxy as T // if already wrapped, return it
 
   proxy = new Proxy(target, {
-    get: (target, key) => {
-      if (key === RAW) return unwrap(target)
+    get: (target, key, proxy) => {
+      if (key === RAW) return target
       if (key === TRACK) return trackSelf(target)
+      if (key === RAW_TRACKED) {
+        trackAll(proxy)
+        return target
+      }
 
       const nodes = getNodes(target), tracked = nodes[key as string | symbol]
-      let value = tracked === undefined ? target[key as keyof typeof target] : tracked.current()
+      let value = tracked === undefined ? target[key as keyof typeof target] : tracked.current(false, true)
 
-      if (tracked === undefined && isListening()) value = getNode(nodes, key as string | symbol, value).current()
+      if (tracked === undefined && isListening()) value = getNode(nodes, key as string | symbol, value).current(false, true)
 
       return wrap(value)
     },
     set: (target, key, value, proxy) => {
-      if (key === RAW) return false
-      if (key === TRACK) return false
+      if (key === RAW) return true
+      if (key === TRACK) return true
+      if (key === RAW_TRACKED) return true
+      value = typeIs(value, "table") ? withoutWrap(value) : value
       const current = target[key as keyof typeof target]
 
       if (current === value) return true

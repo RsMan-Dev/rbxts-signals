@@ -118,7 +118,7 @@ export function runWithOwner<T>(owner: ComputationNode | undefined, fn: () => T)
 
 export interface INode<T> {
   clock(): IClock;
-  current(untrack?: boolean): T;
+  current: (untrack?: boolean, instantaneous?: boolean) => T;
 }
 
 
@@ -142,19 +142,21 @@ export class ComputationNode implements INode<unknown> {
   context = new Map<object, unknown>();
   kept = false; // if true, the node will not be be recycled and will be kept like he had dependencies, used for kept state in async gaps
 
+  // current is not a property, allowing to pass the function as a callback in variables
+  current: (untrack?: boolean, instantaneous?: boolean) => any;
+
   constructor() {
-  }
-
-  current() {
-    if (Listener !== undefined) {
-      if (this.age === RootClock.time) {
-        if (this.state === RUNNING) throw "circular dependency";
-        else updateNode(this); // checks for state === STALE internally, so don't need to check here
+    this.current = (untrack, _) => {
+      if (Listener !== undefined) {
+        if (this.age === RootClock.time) {
+          if (this.state === RUNNING) throw "circular dependency";
+          else updateNode(this); // checks for state === STALE internally, so don't need to check here
+        }
+        if (!untrack) logComputationRead(this);
       }
-      logComputationRead(this);
-    }
 
-    return this.value;
+      return this.value;
+    }
   }
 
   clock() {
@@ -182,7 +184,7 @@ export function getCandidateNode() {
   LastNode = undefined;
 
   if (Owner && Owner.context.size() > 0) {
-    Owner.context.forEach((v, k) => node.context.set(k, v))
+    for (const [k, v] of Owner.context) node.context.set(k, v);
   }
 
   return node;
@@ -212,7 +214,7 @@ export function createRoot<T>(fn: (dispose: () => void) => T): T {
     Owner = owner;
   }
 
-  if (recycleOrClaimNode(root, undefined as any, undefined, true)) root = undefined!;
+  if (recycleOrClaimNode(root, undefined as any, undefined, true)) { root = undefined! };
 
   return result;
 }
@@ -278,10 +280,18 @@ class DataNode implements IDataNode<unknown> {
   pending = NOTPENDING as unknown;
   log = undefined as Log | undefined;
 
+  current: (untrack?: boolean, instantaneous?: boolean) => unknown;
+
   constructor(
     public value: unknown,
     public signalPredicate = true as ((a: unknown, b: unknown) => boolean) | boolean
-  ) { }
+  ) {
+    this.current = (untrack, instantaneous) => {
+      if (!untrack && Listener !== undefined) logDataRead(this);
+      if (CurrBench !== undefined) CurrBench.reads++;
+      return instantaneous ? this.getInstantaneousValue() : this.value;
+    }
+  }
 
   getInstantaneousValue() {
     if (this.pending === NOTPENDING) return this.value;
@@ -289,20 +299,17 @@ class DataNode implements IDataNode<unknown> {
   }
 
   shouldUpdate(a: unknown, b: unknown) {
-    if (this.signalPredicate === false) return true;
+    // Most common case first (direct equality check)
     if (this.signalPredicate === true) return a !== b;
+    // Less common cases
+    if (this.signalPredicate === false) return true;
     return !this.signalPredicate(a, b);
-  }
-
-  current(untrack = false) {
-    if (!untrack && Listener !== undefined) logDataRead(this);
-    if (CurrBench !== undefined) CurrBench.reads++;
-    return this.value;
   }
 
   next(value: unknown) {
     if (!this.shouldUpdate(this.pending === NOTPENDING ? this.value : this.pending, value)) return value!;
 
+    // Batched case
     if (RunningClock !== undefined) {
       const notPending = this.pending === NOTPENDING;
       this.pending = value;
@@ -351,9 +358,19 @@ export function makeDataNode<T>(value: T, options?: { eq?: ((a: T, b: T) => bool
  * @returns An accessor function that will return the data node when called
  */
 export function makeLazyDataNode<T>(value: T, options?: { eq?: ((a: T, b: T) => boolean) | false, lazy?: boolean }) {
-  let node = options?.lazy ?? true ? undefined : makeDataNode(value, options);
+  let node = options === undefined || options.lazy !== false ? undefined : makeDataNode(value, options);
   const owner = Owner;
-  return () => node ??= runWithOwner(owner ?? Owner, () => makeDataNode(value, options));
+  return () => {
+    if (node !== undefined) return node;
+    const _owner = Owner;
+    Owner = owner ?? _owner;
+    try {
+      node = makeDataNode(value, options);
+      return node;
+    } finally {
+      Owner = _owner;
+    }
+  };
 }
 
 
@@ -391,7 +408,7 @@ export function createSignal<T>(value: T, options?: { eq?: ((a: T, b: T) => bool
         return node().next(fn(node().getInstantaneousValue()));
       };
       else if (key === "peek") return node().current(true);
-      else if (key === "accessor") return () => node().current();
+      else if (key === "accessor") return node().current;
 
       return target[key as keyof typeof target]; // allow to access the signal object properties
     },
@@ -431,7 +448,7 @@ export function makeMemoNode<T>(fn: (v: T | undefined) => T, value: T | undefine
   let dataNode: IDataNode<T> | undefined;
 
   const computationNode = createComputation<T, T | undefined>((V?: T) => {
-    const newVal = batch(() => fn(V))
+    const newVal = fn(V)
     if (dataNode) dataNode.next(newVal);
     return newVal;
   }, value, false, false);
@@ -454,9 +471,19 @@ export function makeMemoNode<T>(fn: (v: T | undefined) => T, value: T | undefine
  * @returns 
  */
 export function makeLazyMemoNode<T>(fn: (v: T | undefined) => T, value: T | undefined, options?: { eq?: ((a: T, b: T) => boolean) | false, lazy?: boolean }) {
-  let dataNode = options?.lazy ?? true ? undefined : makeMemoNode(fn, value, options);
+  let node = options === undefined || options.lazy !== false ? undefined : makeMemoNode(fn, value, options);
   const owner = Owner;
-  return () => dataNode ??= runWithOwner(owner ?? Owner, () => makeMemoNode(fn, value, options));
+  return () => {
+    if (node !== undefined) return node;
+    const _owner = Owner;
+    Owner = owner ?? _owner;
+    try {
+      node = makeMemoNode(fn, value, options);
+      return node;
+    } finally {
+      Owner = _owner;
+    }
+  };
 }
 
 
@@ -482,8 +509,8 @@ export function createMemo<T>(fn: (v: T | undefined) => T, value?: T, options?: 
     __call: () => node().current(),
     __index: (target, key) => {
       if (key === "val") return node().current();
-      else if (key === "peek") return untrack(() => node().current());
-      else if (key === "accessor") return () => node().current();
+      else if (key === "peek") return node().current(true);
+      else if (key === "accessor") return node().current;
 
       return target[key as keyof typeof target]; // allow to access the signal object properties
     },
@@ -509,12 +536,17 @@ export function isReadonlySignal<T>(signal: unknown): signal is ReadonlySignal<T
  * @returns The result of the function execution
  */
 export function untrack<T>(fn: () => T) {
+  // Fast path: if no listener is active, avoid temporary variable overhead
+  if (Listener === undefined) return fn();
+
   let result: T;
   const listener = Listener;
-
   Listener = undefined;
-  result = fn();
-  Listener = listener;
+  try {
+    result = fn();
+  } finally {
+    Listener = listener;
+  }
 
   return result;
 }
@@ -533,7 +565,7 @@ export function createEffect<T>(fn: (v: T | undefined) => T): () => T
 export function createEffect<S, T>(fn: (v: S) => T, value: S): () => T
 export function createEffect<T>(fn: (v: T | undefined) => T, value?: T) {
   const { node, value: _value } = createComputation(fn, value, false, false);
-  return node === undefined ? () => _value : () => node!.current();
+  return node === undefined ? () => _value : node!.current;
 }
 
 /**
@@ -576,24 +608,23 @@ export function on<I, T>(on: () => I, fn: (r: I, v?: T) => T, options?: { defer?
  * @returns The result of the function execution
  */
 export function batch<T>(fn: () => T) {
-  let result: T = undefined!;
+  // Fast path - if already in a batch, just run the function directly
+  if (RunningClock !== undefined) return fn();
 
-  if (RunningClock !== undefined) result = fn();
-  else {
-    RunningClock = RootClock;
-    RunningClock.changes.reset();
+  // New batch - set up clock and run
+  RunningClock = RootClock;
+  RunningClock.changes.reset();
 
-    try {
-      result = fn();
-      event();
-    } finally {
-      RunningClock = undefined;
-    }
+  let result: T;
+  try {
+    result = fn();
+    event(); // event() will handle time increment and updates
+  } finally {
+    RunningClock = undefined;
   }
 
   return result;
 }
-
 
 /**
  * # On cleanup
@@ -682,8 +713,8 @@ class Context<T> {
    * @param props The props of the child component, including the value to set in the context
    * @returns The result of the function execution
    */
-  Provider<R>(props: { children: R, value: T }) {
-    return this.apply(props.value, () => props.children);
+  Provider<R>(props: { Children: R, Value: T }) {
+    return this.apply(props.Value, () => props.Children);
   }
 }
 
@@ -812,31 +843,43 @@ function finishToplevelComputation(owner: ComputationNode | undefined, listener:
 
 
 function recycleOrClaimNode<T>(node: ComputationNode, fn: (v: T | undefined) => T, value: T, orphan: boolean) {
-  const _owner = orphan || Owner === undefined || Owner === UNOWNED ? undefined : Owner,
-    recycle = node.kept === false && node.source1 === undefined && (node.owned === undefined && node.cleanups === undefined || _owner !== undefined);
+  // Get owner if there is one or if not orphaned
+  const _owner = orphan || Owner === UNOWNED ? undefined : Owner;
+
+  // Node can be recycled if:
+  // 1. It's not being kept
+  // 2. It has no dependencies like data nodes called when it was the Listener
+  // 3. Owns nothing and has no cleanups (no need to dispose) or has an owner to transfer them to
+  const recycle =
+    node.kept === false &&
+    node.source1 === undefined &&
+    (node.owned === undefined && node.cleanups === undefined || _owner !== undefined);
 
   if (recycle) {
+    // Mark for reuse
     LastNode = node;
 
-    if (_owner !== undefined) {
-      if (node.owned !== undefined) {
-        if (_owner.owned === undefined) _owner.owned = node.owned;
-        else for (const ownedNode of node.owned) _owner.owned[_owner.owned.size()] = ownedNode;
-      }
-
-      if (node.cleanups !== undefined) {
-        if (_owner.cleanups === undefined) _owner.cleanups = node.cleanups;
-        else for (const cleanup of node.cleanups) _owner.cleanups[_owner.cleanups.size()] = cleanup;
-      }
-
-      node.owned = node.cleanups = undefined;
-      node.context.clear();
+    // If there's any element to transfer, transfer them to the owner, and clear contexts
+    // (owner is logically defined if any transferable data is present, unless it would be not recyclable, cf above)
+    if (node.owned !== undefined) {
+      if (_owner!.owned === undefined) _owner!.owned = node.owned;
+      else for (const ownedNode of node.owned) _owner!.owned[_owner!.owned.size()] = ownedNode;
     }
+
+    if (node.cleanups !== undefined) {
+      if (_owner!.cleanups === undefined) _owner!.cleanups = node.cleanups;
+      else for (const cleanup of node.cleanups) _owner!.cleanups[_owner!.cleanups.size()] = cleanup;
+    }
+
+    node.owned = node.cleanups = undefined;
+    node.context.clear();
   } else {
+    // Set the node its own function, value and age (claim it)
     node.fn = fn;
     node.value = value;
     node.age = RootClock.time;
 
+    // Add node to owner's owned list
     if (_owner !== undefined) {
       if (_owner.owned === undefined) _owner.owned = [node];
       else _owner.owned[_owner.owned.size()] = node;
@@ -888,10 +931,14 @@ function logComputationRead(node: ComputationNode) {
 }
 
 function event() {
-  // b/c we might be under a top level S.root(), have to preserve current root
+  // Preserve current owner while running events
   const owner = Owner;
+
+  // Reset updates queue and increment time
   RootClock.updates.reset();
   RootClock.time++;
+
+  // Run the clock updates with try/finally to ensure state is restored
   try {
     run(RootClock);
   } finally {
@@ -917,7 +964,7 @@ function run(clock: Clock) {
     clock.updates.run(updateNode);
     clock.disposes.run(dispose);
 
-    // if there are still changes after excessive batches, assume runaway            
+    // if there are still changes after excessive batches, assume runaway
     if (++count > 1e5) throw "Runaway clock detected";
   }
 
@@ -942,13 +989,18 @@ function markComputationsStale(log: Log) {
 
 function markNodeStale(node: ComputationNode) {
   const time = RootClock.time;
-  if (node.age < time) {
-    node.age = time;
-    node.state = STALE;
-    RootClock.updates.add(node);
-    if (node.owned !== undefined) markOwnedNodesForDisposal(node.owned);
-    if (node.log !== undefined) markComputationsStale(node.log);
-  }
+
+  if (node.age >= time) return; // Already processed this cycle
+
+  node.age = time;
+  node.state = STALE;
+  RootClock.updates.add(node);
+
+  // Handle owned nodes if any
+  if (node.owned !== undefined) markOwnedNodesForDisposal(node.owned);
+
+  // Mark downstream nodes if any
+  if (node.log !== undefined) markComputationsStale(node.log);
 }
 
 function markOwnedNodesForDisposal(owned: ComputationNode[]) {
@@ -960,25 +1012,24 @@ function markOwnedNodesForDisposal(owned: ComputationNode[]) {
 }
 
 function updateNode(node: ComputationNode) {
-  if (node.state === STALE) {
-    const owner = Owner, listener = Listener;
+  // Fast return if node isn't stale - avoid further checks
+  if (node.state !== STALE) return
 
-    Owner = Listener = node;
+  const owner = Owner, listener = Listener;
 
-    node.state = RUNNING;
-    cleanupNode(node, false);
-    if (CurrBench !== undefined) CurrBench.computations++;
-    node.value = node.fn!(node.value);
-    node.state = CURRENT;
+  Owner = Listener = node;
 
-    Owner = owner;
-    Listener = listener;
-  }
+  node.state = RUNNING;
+  cleanupNode(node, false);
+  if (CurrBench !== undefined) CurrBench.computations++;
+  node.value = node.fn!(node.value);
+  node.state = CURRENT;
+
+  Owner = owner;
+  Listener = listener;
 }
 
 function cleanupNode(node: ComputationNode, final: boolean) {
-  const sourceslots = node.sourceslots;
-
   if (node.cleanups !== undefined) {
     for (const cleanup of node.cleanups) cleanup(final);
     node.cleanups = undefined;
@@ -994,9 +1045,9 @@ function cleanupNode(node: ComputationNode, final: boolean) {
     node.source1 = undefined;
   }
 
-  if (node.sources !== undefined && sourceslots !== undefined) {
+  if (node.sources !== undefined && node.sourceslots !== undefined) {
     for (let i = 0; i < node.sources.size(); i++) {
-      cleanupSource(node.sources!.pop()!, sourceslots!.pop()!);
+      cleanupSource(node.sources!.pop()!, node.sourceslots!.pop()!);
     }
   }
 }
