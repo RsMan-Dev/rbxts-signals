@@ -1,0 +1,1 @@
+export declare function withArgCount<P extends unknown[], R>(fn: (count: number, ...args: P) => R): (...args: P) => R[];
