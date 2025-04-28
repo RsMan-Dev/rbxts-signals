@@ -17,9 +17,9 @@
     "!**/*.tsbuildinfo"
   ],
   "exports":{
-    ".": "./out/init.lua",
-    "./store": "./out/store/init.lua",
-    "./primitives": "./out/primitives/init.lua"
+    ".": "./out/",
+    "./store": "./out/store/",
+    "./primitives": "./out/primitives/"
   },
   "publishConfig": {
     "access": "public"
