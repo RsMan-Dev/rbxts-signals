@@ -1,4 +1,5 @@
 -- Compiled with roblox-ts v3.0.0
+local curves
 local function keyframes(...)
 	local keys = { ... }
 	return function(t)
@@ -13,9 +14,7 @@ local function keyframes(...)
 			local key = keys[i + 1]
 			if t <= key.at then
 				local progress = (t - prevKey.at) / (key.at - prevKey.at)
-				local easing = key.easing or (function(x)
-					return x
-				end)
+				local easing = key.easing or curves.linear
 				return prevKey.value + easing(progress) * (key.value - prevKey.value)
 			end
 			prevKey = key
@@ -23,19 +22,15 @@ local function keyframes(...)
 		return keys[#keys].value
 	end
 end
-local curves
 curves = {
-	cubicBezier = function(x1, y1, x2, y2)
-		local cx = 3 * x1
-		local bx = 3 * (x2 - x1) - cx
-		local ax = 1 - cx - bx
-		local cy = 3 * y1
-		local by = 3 * (y2 - y1) - cy
-		local ay = 1 - cy - by
+	cubicBezier = function(p0, p1, p2, p3)
 		return function(t)
-			local t2 = t * t
-			local t3 = t2 * t
-			return ax * t3 + bx * t2 + cx * t + cy * t2 + by * t + ay
+			local u = 1 - t
+			local tt = t * t
+			local uu = u * u
+			local uuu = uu * u
+			local ttt = tt * t
+			return uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y
 		end
 	end,
 	linear = function(t)
@@ -91,8 +86,7 @@ curves = {
 		return t * t * ((s + 1) * t - s)
 	end,
 	backIn = function(t)
-		local s = 1.70158
-		return t * t * ((s + 1) * t - s)
+		return curves.back(t)
 	end,
 	backOut = function(t)
 		local s = 1.70158

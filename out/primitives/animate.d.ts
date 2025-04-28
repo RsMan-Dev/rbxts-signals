@@ -3,8 +3,12 @@ export declare function keyframes(...keys: {
     value: number;
     easing?: (t: number) => number;
 }[]): (t: number) => number;
+interface Point {
+    x: number;
+    y: number;
+}
 export declare const curves: {
-    cubicBezier: (x1: number, y1: number, x2: number, y2: number) => (t: number) => number;
+    cubicBezier: (p0: Point, p1: Point, p2: Point, p3: Point) => (t: number) => number;
     linear: (t: number) => number;
     easeIn: (t: number) => number;
     easeOut: (t: number) => number;
@@ -23,3 +27,4 @@ export declare const curves: {
     backInOut: (t: number) => number;
     steps: (steps: number, direction?: "start" | "end" | "both") => (t: number) => number;
 };
+export {};
