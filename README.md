@@ -38,13 +38,17 @@ This way, proxies or any other non-lua elements will become almost invisible to 
 
 ## Installation
 
-Currently available through GitHub:
+Currently available through GitHub (to get the latest commited build, ensure using commit hash for stability):
 
 ```bash
 npm install @rbxts/signals@github:RsMan-Dev/rbxts-signals
 ```
 
-> Note: NPM package coming soon!
+Via NPM:
+
+```bash
+npm install @rbxts/signals
+```
 
 ## Key Concepts
 

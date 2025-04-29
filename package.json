@@ -1,6 +1,6 @@
 {
   "name": "@rbxts/signals",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "main": "out/init.lua",
   "scripts": {
     "build": "rbxtsc",
@@ -41,7 +41,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@rbxts/jsnatives": "github:RsMan-Dev/rbxts-jsnatives",
+    "@rbxts/jsnatives": "^1.0.0",
     "@rbxts/services": "^1.5.5"
   }
 }
