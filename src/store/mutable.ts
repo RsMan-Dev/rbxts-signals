@@ -1,5 +1,5 @@
-import { Object, Proxy } from '@rbxts/jsnatives'
-import { IDataNode, makeDataNode, isListening, untrack, batch, getOwner, onCleanup } from '../signals'
+import { ArrayUtils, Object, Proxy } from '@rbxts/jsnatives'
+import { IDataNode, makeDataNode, isListening, untrack, batch } from '../signals'
 
 const objectNodes = new WeakMap<object, Record<string | symbol, IDataNode<unknown>>>()
 const objectProxies = new WeakMap<object, object>()
@@ -37,7 +37,7 @@ export function unwrap<T>(obj: T, untracks = true): T {
   if (untracks) return untrack(() => unwrap(obj, false))
   if (!isWrapped(obj)) return obj
 
-  if (Object.isArray(obj)) {
+  if (ArrayUtils.isArray(obj)) {
     const newObj = [] as unknown[]
     for (const val of obj) newObj[newObj.size()] = unwrap(val)
     return newObj as T
@@ -106,11 +106,11 @@ function wrap<T>(target: T): T {
           if ( // both objects or both arrays, otherwise, simple setter
             typeIs(value, "table") &&
             typeIs(current, "table") &&
-            Object.isArray(value) === Object.isArray(current)
+            ArrayUtils.isArray(value) === ArrayUtils.isArray(current)
           ) {
             const proxyCurrent = proxy[key as keyof typeof proxy] as Record<string | symbol, unknown>
             let anyStructuralChangeMade = false
-            if (Object.isArray(value) && Object.isArray(current)) {
+            if (ArrayUtils.isArray(value) && ArrayUtils.isArray(current)) {
               const currSize = current.size(), newSize = value.size()
               for (let i = 0; i < newSize || i < currSize; i++) {
                 const newVal = value[i], currVal = current[i]

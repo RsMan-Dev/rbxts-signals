@@ -1,6 +1,7 @@
 -- Compiled with roblox-ts v3.0.0
 local TS = _G[script]
 local _jsnatives = TS.import(script, TS.getModule(script, "@rbxts", "jsnatives").out)
+local ArrayUtils = _jsnatives.ArrayUtils
 local Object = _jsnatives.Object
 local Proxy = _jsnatives.Proxy
 local _signals = TS.import(script, script.Parent.Parent, "signals")
@@ -86,7 +87,7 @@ local function unwrap(obj, untracks)
 	if not isWrapped(obj) then
 		return obj
 	end
-	if Object.isArray(obj) then
+	if ArrayUtils.isArray(obj) then
 		local newObj = {}
 		for _, val in obj do
 			newObj[#newObj + 1] = unwrap(val)
@@ -183,12 +184,12 @@ local function wrap(target)
 					local _value_1 = value
 					local _condition = type(_value_1) == "table"
 					if _condition then
-						_condition = type(current) == "table" and Object.isArray(value) == Object.isArray(current)
+						_condition = type(current) == "table" and ArrayUtils.isArray(value) == ArrayUtils.isArray(current)
 					end
 					if _condition then
 						local proxyCurrent = proxy[key]
 						local anyStructuralChangeMade = false
-						if Object.isArray(value) and Object.isArray(current) then
+						if ArrayUtils.isArray(value) and ArrayUtils.isArray(current) then
 							local currSize = #current
 							local newSize = #value
 							do
